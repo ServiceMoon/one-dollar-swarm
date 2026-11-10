@@ -1,0 +1,13 @@
+{
+  "name": "ember-starter",
+  "version": "1.0.0",
+  "description": "One Dollar Swarm — parallel Muse Ember agents via OpenRouter with a hard $1 budget meter",
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node server.js",
+    "smoke": "node smoke.js",
+    "test": "node --test test/*.test.js"
+  },
+  "license": "MIT"
+}

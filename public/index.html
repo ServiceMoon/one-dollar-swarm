@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>One Dollar Swarm</title>
+<style>
+  :root { --bg:#0b0b0d; --fg:#f2f2f2; --mut:#8a8a93; --acc:#ff7a1a; --card:#16161a; --line:#26262c; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:15px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; background:var(--bg); padding:20px 28px 16px; border-bottom:1px solid var(--line); z-index:2; }
+  h1 { margin:0 0 12px; font-size:20px; letter-spacing:-.01em; }
+  h1 span { color:var(--acc); }
+  form { display:flex; gap:8px; }
+  input { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit; }
+  #q { flex:1; }
+  #n { width:90px; }
+  button { background:var(--acc); color:#000; border:0; border-radius:8px; padding:0 18px; font-weight:600; cursor:pointer; }
+  .meter { margin-top:14px; display:flex; align-items:center; gap:14px; font-variant-numeric:tabular-nums; }
+  .bar { flex:1; height:10px; background:var(--card); border-radius:99px; overflow:hidden; }
+  .fill { height:100%; width:0; background:linear-gradient(90deg,#ffb36b,var(--acc)); transition:width .25s; }
+  #money { font-size:22px; font-weight:700; min-width:170px; }
+  #stats, #status { color:var(--mut); font-size:13px; }
+  main { padding:20px 28px 60px; }
+  #final { background:var(--card); border:1px solid var(--acc); border-radius:12px; padding:16px 20px; margin-bottom:20px; white-space:pre-wrap; display:none; }
+  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px; opacity:.45; transition:opacity .3s,border-color .3s; }
+  .card.done { opacity:1; border-color:#3a3a42; }
+  .card.err { border-color:#7a2a2a; }
+  .card b { display:block; font-size:12px; color:var(--acc); }
+  .card i { display:block; color:var(--mut); font-size:11px; margin-bottom:6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>One Dollar <span>Swarm</span> · <small id="model" style="color:var(--mut);font-weight:400"></small></h1>
+  <form id="f">
+    <input id="q" placeholder="Ask a hard question…" required />
+    <input id="n" type="number" min="1" max="1000" value="100" title="Number of parallel agents" />
+    <button>Launch</button>
+  </form>
+  <div class="meter">
+    <div id="money">$0.0000 / $1</div>
+    <div class="bar"><div class="fill" id="fill"></div></div>
+    <div id="stats">0 calls</div>
+  </div>
+  <div id="status"></div>
+</header>
+<main>
+  <div id="final"></div>
+  <div id="grid"></div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const es = new EventSource('/events');
+  const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : n;
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+  es.addEventListener('model', (e) => $('model').textContent = JSON.parse(e.data).model);
+  es.addEventListener('meter', (e) => {
+    const s = JSON.parse(e.data);
+    $('money').textContent = `$${s.spent.toFixed(4)} / $${s.limit}`;
+    $('fill').style.width = s.pct + '%';
+    $('stats').textContent = `${s.calls} calls · ${fmt(s.inTok)} in · ${fmt(s.outTok)} out`;
+  });
+  es.addEventListener('status', (e) => $('status').textContent = JSON.parse(e.data).msg);
+  es.addEventListener('error', (e) => { if (e.data) $('status').textContent = 'Error: ' + JSON.parse(e.data).msg; });
+  es.addEventListener('agents', (e) => {
+    $('grid').innerHTML = JSON.parse(e.data).map((a, i) =>
+      `<div class="card" id="c${i}"><b>${esc(a.name)}</b><i>${esc(a.lens)}</i><span>…</span></div>`).join('');
+  });
+  es.addEventListener('answer', (e) => {
+    const r = JSON.parse(e.data), c = $('c' + r.i);
+    if (!c) return;
+    c.classList.add(r.ok ? 'done' : 'err');
+    c.querySelector('span').textContent = r.ok ? r.value : r.error;
+  });
+  es.addEventListener('final', (e) => { $('final').style.display = 'block'; $('final').textContent = JSON.parse(e.data).text; });
+  $('f').onsubmit = (e) => {
+    e.preventDefault();
+    $('final').style.display = 'none'; $('grid').innerHTML = '';
+    fetch('/run', { method: 'POST', body: JSON.stringify({ question: $('q').value, n: $('n').value }) });
+  };
+</script>
+</body>
+</html>

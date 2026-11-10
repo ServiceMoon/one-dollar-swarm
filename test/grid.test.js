@@ -48,3 +48,10 @@ test('extractJob falls back to page text without scripts/styles', () => {
 test('htmlToText decodes entities and keeps list structure', () => {
   assert.equal(htmlToText('<ul><li>A &amp; B</li><li>C&#39;s</li></ul>'), '- A & B\n- C\'s');
 });
+
+import { salvage } from '../server.js';
+test('salvage recovers verdict/quote/note from truncated model JSON', () => {
+  assert.deepEqual(salvage('{"verdict":"met","quote":"Led a te'), { verdict: 'met', quote: 'Led a te', note: '' });
+  assert.deepEqual(salvage('{"verdict":"missing","quote":"","note":"No bring-up date, er'), { verdict: 'missing', quote: '', note: 'No bring-up date, er' });
+  assert.equal(salvage('{"verdict":"'), null);
+});

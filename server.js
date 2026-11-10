@@ -41,6 +41,15 @@ export function verifyQuote(quote, resume) {
   return words.filter((w) => bag.has(w)).length / words.length >= 0.8;
 }
 
+/** Recover fields from truncated JSON like {"verdict":"met","quote":"Led a te */
+export function salvage(text) {
+  const t = String(text || '');
+  const verdict = (t.match(/"verdict"\s*:\s*"(met|partial|missing)"/) || [])[1];
+  if (!verdict) return null;
+  const field = (k) => ((t.match(new RegExp(`"${k}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)`)) || [])[1] || '').replace(/\\"/g, '"');
+  return { verdict, quote: field('quote'), note: field('note') };
+}
+
 export function parseCandidates(text) {
   return String(text || '').split(/\n\s*-{3,}\s*\n/).map((t) => t.trim()).filter(Boolean)
     .map((t, i) => ({ name: (t.split('\n')[0] || `Candidate ${i + 1}`).replace(/^#+\s*/, '').slice(0, 60), text: t }));
@@ -134,18 +143,22 @@ export async function run({ job, jobUrl, candidates: candIn, n }) {
   send('status', { msg: `${jobs.length} evidence checks (${criteria.length} criteria × ${candidates.length} candidates)…` });
   const ci = new Map(candidates.map((c, i) => [c, i]));
   await swarm(jobs, async ({ cand, crit }) => {
-    const { json, text } = await ask(
-      `CRITERION: ${crit.criterion}\nWHAT COUNTS AS EVIDENCE: ${crit.evidence}\n\nRESUME:\n${cand.text}`,
-      {
-        system: 'You verify ONE hiring criterion against ONE resume. Be strict: no evidence in the resume means "missing". ' +
-          'Return JSON {"verdict":"met"|"partial"|"missing","quote":"exact words copied from the resume, or empty","note":"<=12 words"}.',
-        json: true, reasoning: LOW, temperature: 0, max_tokens: 300,
-      },
-    );
-    if (!json) throw new Error(text?.slice(0, 60) || 'no JSON');
-    const verdict = ['met', 'partial', 'missing'].includes(json.verdict) ? json.verdict : 'missing';
-    const verified = verdict === 'missing' ? true : verifyQuote(json.quote, cand.text);
-    return { verdict: verdict !== 'missing' && !verified ? 'unverified' : verdict, quote: json.quote || '', note: json.note || '' };
+    let parsed;
+    for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+      const { json, text } = await ask(
+        `CRITERION: ${crit.criterion}\nWHAT COUNTS AS EVIDENCE: ${crit.evidence}\n\nRESUME:\n${cand.text}`,
+        {
+          system: 'You verify ONE hiring criterion against ONE resume. Be strict: no evidence in the resume means "missing". ' +
+            'Reply with ONLY compact JSON {"verdict":"met"|"partial"|"missing","quote":"<=25 exact words copied from the resume, or empty","note":"<=12 words"}.',
+          json: true, reasoning: LOW, temperature: 0, max_tokens: 900,
+        },
+      );
+      parsed = json || salvage(text);
+    }
+    if (!parsed) throw new Error('no answer');
+    const verdict = ['met', 'partial', 'missing'].includes(parsed.verdict) ? parsed.verdict : 'missing';
+    const verified = verdict === 'missing' ? true : verifyQuote(parsed.quote, cand.text);
+    return { verdict: verdict !== 'missing' && !verified ? 'unverified' : verdict, quote: parsed.quote || '', note: parsed.note || '' };
   }, {
     concurrency: 48,
     onResult: (r, i) => send('cell', { c: ci.get(jobs[i].cand), k: jobs[i].crit.id, ...(r.ok ? r.value : { verdict: 'error', note: r.error }) }),

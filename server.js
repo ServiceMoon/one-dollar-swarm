@@ -1,5 +1,6 @@
-// Live demo server: fan a question out to N parallel Muse Ember agents,
-// stream each answer + a live "$ of $1" meter to the browser, then synthesize.
+// $1 Hiring Grid: Muse Ember generates up to ~100 industry hiring criteria in
+// parallel, then one agent checks each (criterion x candidate) and must quote
+// evidence. Quotes are verified verbatim against the resume ("receipts").
 //   node server.js   →  http://localhost:3000
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
@@ -7,64 +8,186 @@ import { ask, swarm, meter, loadEnv, MODEL } from './lib/ember.js';
 
 await loadEnv();
 const PORT = Number(process.env.PORT || 3000);
+const LOW = { effort: 'low' };
 const clients = new Set();
 const send = (event, data) => { for (const c of clients) c.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); };
 meter.onChange((s) => send('meter', s));
 
-async function run({ question, n }) {
-  n = Math.max(1, Math.min(Number(n) || 50, 1000));
-  send('status', { msg: `Designing ${n} distinct perspectives…` });
+export const CATEGORIES = [
+  ['Role skills', 'hard technical/functional skills the job explicitly or implicitly requires'],
+  ['Domain knowledge', 'industry, product-area and customer knowledge for this role'],
+  ['Experience & seniority', 'years, scope, level, team size, complexity of past work'],
+  ['Impact & outcomes', 'measurable results: metrics moved, things shipped, revenue, scale'],
+  ['Career trajectory', 'growth rate, promotions, increasing scope, slope over time'],
+  ['Ownership & leadership', 'leading projects/people, initiative, founding, driving decisions'],
+  ['Collaboration & communication', 'cross-functional work, writing, mentoring, stakeholder mgmt'],
+  ['Credentials & learning', 'relevant education, certifications, publications, open source, awards'],
+  ['Company & stage fit', 'fit with company size/stage/pace, similar environments, tooling'],
+  ['Risk signals', 'gaps between claims and evidence, very short tenures, missing must-haves (phrase each as a positive criterion to check)'],
+];
 
-  // 1) One call invents N distinct expert lenses (cheap, structured).
-  const { json } = await ask(
-    `Question: "${question}"\nInvent ${n} genuinely different expert perspectives to attack this question ` +
-    `(different fields, incentives, eras, contrarians). Return {"agents":[{"name":"...","lens":"one sentence"}]} with exactly ${n} items.`,
-    { json: true, reasoning: { effort: 'low' }, temperature: 0.9, max_tokens: Math.min(60 * n + 200, 60000) },
-  );
-  const agents = (json?.agents || []).slice(0, n);
-  while (agents.length < n) agents.push({ name: `Generalist #${agents.length + 1}`, lens: 'first-principles thinker' });
-  send('agents', agents);
+const PROTECTED = /\b(age|gender|sex|race|ethnic|religio|nationality|national origin|citizenship|marital|pregnan|disabilit|veteran|sexual orientation|photo|birth)\w*/i;
 
-  // 2) Fan out — every agent answers in parallel.
-  send('status', { msg: `Running ${agents.length} agents in parallel…` });
-  const results = await swarm(agents, async (a) => {
-    const r = await ask(question, {
-      system: `You are ${a.name}. Lens: ${a.lens}. Answer in <=60 words. Be specific and non-obvious. End with a confidence 0-100 as "CONF: N".`,
-      temperature: 0.8, max_tokens: 400, reasoning: { effort: 'low' },
-    });
-    return r.text;
-  }, { concurrency: 32, onResult: (r, i) => send('answer', { i, ...r }) });
-
-  // 3) Synthesize.
-  send('status', { msg: 'Synthesizing the swarm…' });
-  const corpus = results.map((r, i) => r.ok ? `[${agents[i].name}] ${r.value}` : '').filter(Boolean).join('\n');
-  const final = await ask(
-    `Question: "${question}"\n\n${agents.length} independent experts answered:\n${corpus}\n\n` +
-    `Synthesize: (1) the consensus answer, (2) the strongest dissent and who raised it, (3) the single most surprising insight. Markdown, <=200 words.`,
-    { max_tokens: 600, temperature: 0.3 },
-  );
-  send('final', { text: final.text });
-  send('status', { msg: `Done — ${meter.calls} calls, $${meter.spent.toFixed(4)} spent.` });
+export const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+/** Is the quoted evidence actually in the resume? (fuzzy: 80% of quote words, in order-insensitive bag) */
+export function verifyQuote(quote, resume) {
+  const q = norm(quote);
+  if (!q) return false;
+  const r = norm(resume);
+  if (r.includes(q)) return true;
+  const words = q.split(' ').filter((w) => w.length > 2);
+  if (words.length < 3) return false;
+  const bag = new Set(r.split(' '));
+  return words.filter((w) => bag.has(w)).length / words.length >= 0.8;
 }
 
-http.createServer(async (req, res) => {
-  if (req.url === '/events') {
-    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
-    res.write(`event: meter\ndata: ${JSON.stringify(meter.snapshot())}\n\n`);
-    res.write(`event: model\ndata: ${JSON.stringify({ model: MODEL })}\n\n`);
-    clients.add(res);
-    req.on('close', () => clients.delete(res));
-    return;
+export function parseCandidates(text) {
+  return String(text || '').split(/\n\s*-{3,}\s*\n/).map((t) => t.trim()).filter(Boolean)
+    .map((t, i) => ({ name: (t.split('\n')[0] || `Candidate ${i + 1}`).replace(/^#+\s*/, '').slice(0, 60), text: t }));
+}
+
+const STOP = new Set(['with', 'from', 'that', 'this', 'have', 'into', 'their', 'using', 'experience', 'strong', 'proven', 'demonstrated', 'ability', 'years']);
+const words = (s) => new Set(norm(s).split(' ').filter((w) => w.length > 2 && !STOP.has(w)));
+const jaccard = (a, b) => { let i = 0; for (const w of a) if (b.has(w)) i++; return i / (a.size + b.size - i || 1); };
+
+export function dedupeCriteria(list, max) {
+  const kept = [], out = [];
+  for (const c of list) {
+    if (!c?.criterion || PROTECTED.test(c.criterion)) continue;
+    const w = words(c.criterion);
+    if (!w.size || kept.some((k) => jaccard(w, k) >= 0.7)) continue;
+    kept.push(w);
+    out.push(c);
+    if (out.length >= max) break;
   }
-  if (req.url === '/run' && req.method === 'POST') {
-    let body = '';
-    req.on('data', (c) => (body += c));
-    req.on('end', () => {
-      run(JSON.parse(body || '{}')).catch((e) => send('error', { msg: e.message }));
-      res.writeHead(202).end();
-    });
-    return;
+  return out;
+}
+
+const decode = (s) => s.replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"').replace(/&#39;|&#x27;|&apos;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(n));
+export function htmlToText(html) {
+  return decode(String(html)
+    .replace(/<(script|style|noscript|svg|nav|footer|header)[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(/<(br|\/p|\/div|\/li|\/h\d|\/tr)[^>]*>/gi, '\n').replace(/<li[^>]*>/gi, '\n- ')
+    .replace(/<[^>]+>/g, ' ')).replace(/[ \t]+/g, ' ').split('\n').map((l) => l.trim()).join('\n').replace(/\n{3,}/g, '\n\n').replace(/\n+(?=- )/g, '\n').trim();
+}
+/** Pull the job text out of a page: JSON-LD JobPosting first (Greenhouse/Lever/Ashby/LinkedIn ship it), else page text. */
+export function extractJob(html) {
+  for (const m of String(html).matchAll(/<script[^>]+application\/ld\+json[^>]*>([\s\S]*?)<\/script>/gi)) {
+    try {
+      const data = JSON.parse(m[1]);
+      const nodes = [].concat(data, data['@graph'] || []);
+      const jp = nodes.find((x) => x && [].concat(x['@type']).includes('JobPosting'));
+      if (jp?.description) {
+        const org = jp.hiringOrganization?.name ? ` at ${jp.hiringOrganization.name}` : '';
+        return { title: `${jp.title || 'Job'}${org}`, text: `${jp.title || ''}${org}\n\n${htmlToText(decode(jp.description))}` };
+      }
+    } catch { /* ignore bad JSON-LD */ }
   }
-  const html = await readFile(new URL('./public/index.html', import.meta.url));
-  res.writeHead(200, { 'Content-Type': 'text/html' }).end(html);
-}).listen(PORT, () => console.log(`Ember swarm on http://localhost:${PORT}  (model ${MODEL}, budget $${meter.limit})`));
+  const title = decode((String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || 'Job').trim();
+  const og = decode((String(html).match(/<meta[^>]+property="og:description"[^>]+content="([^"]*)"/i) || [])[1] || '');
+  const body = htmlToText(html);
+  return { title, text: (body.length > 300 ? body : `${og}\n\n${body}`).slice(0, 20000) };
+}
+export async function fetchJob(url) {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Job URL must start with http(s)://');
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/130 Safari/537.36', Accept: 'text/html' }, redirect: 'follow' });
+  if (!res.ok) throw new Error(`Couldn't fetch job page (${res.status}). Paste the description instead.`);
+  const job = extractJob(await res.text());
+  if (job.text.length < 200) throw new Error('That page has almost no text (it may need JavaScript or a login). Paste the description instead.');
+  return job;
+}
+
+export async function run({ job, jobUrl, candidates: candIn, n }) {
+  n = Math.max(10, Math.min(Number(n) || 100, 300));
+  if (!job?.trim() && jobUrl) { send('status', { msg: 'Fetching job description…' }); job = (await fetchJob(jobUrl)).text; }
+  if (!job?.trim()) throw new Error('Add a job description or URL');
+  const candidates = Array.isArray(candIn)
+    ? candIn.filter((c) => c?.text?.trim()).map((c, i) => ({ name: String(c.name || `Candidate ${i + 1}`).slice(0, 60), text: c.text }))
+    : parseCandidates(candIn);
+  if (!candidates.length) throw new Error('Add at least one candidate');
+  send('candidates', candidates.map((c) => c.name));
+
+  // 1) Generate criteria — one agent per category, in parallel.
+  const per = Math.ceil((n * 1.25) / CATEGORIES.length); // over-generate, then dedupe
+  send('status', { msg: `${CATEGORIES.length} agents generating hiring criteria…` });
+  let raw = [];
+  await swarm(CATEGORIES, async ([cat, desc]) => {
+    const { json } = await ask(
+      `JOB DESCRIPTION:\n${job}\n\nYou are a senior recruiter. List ${per} distinct, concrete, CHECKABLE hiring criteria in the category ` +
+      `"${cat}" (${desc}) for THIS role, using real industry standards. Each must be verifiable from a resume. ` +
+      `Never use protected attributes (age, gender, race, religion, nationality, marital status, disability, etc.). ` +
+      `Return {"criteria":[{"criterion":"<=12 words","evidence":"what in a resume proves it, <=12 words","weight":1-5,"must_have":true|false}]}`,
+      { json: true, reasoning: LOW, temperature: 0.6, max_tokens: 2500 },
+    );
+    const items = (json?.criteria || []).map((c) => ({ ...c, category: cat }));
+    raw = raw.concat(items);
+    send('criteriaCount', { count: raw.length });
+  }, { concurrency: 10 });
+
+  const criteria = dedupeCriteria(raw, n).map((c, i) => ({ id: i, ...c, weight: Math.max(1, Math.min(5, Number(c.weight) || 3)) }));
+  send('criteria', { criteria, generated: raw.length });
+
+  // 2) One agent per (criterion x candidate), evidence required.
+  const jobs = [];
+  for (const cand of candidates) for (const crit of criteria) jobs.push({ cand, crit });
+  send('status', { msg: `${jobs.length} evidence checks (${criteria.length} criteria × ${candidates.length} candidates)…` });
+  const ci = new Map(candidates.map((c, i) => [c, i]));
+  await swarm(jobs, async ({ cand, crit }) => {
+    const { json, text } = await ask(
+      `CRITERION: ${crit.criterion}\nWHAT COUNTS AS EVIDENCE: ${crit.evidence}\n\nRESUME:\n${cand.text}`,
+      {
+        system: 'You verify ONE hiring criterion against ONE resume. Be strict: no evidence in the resume means "missing". ' +
+          'Return JSON {"verdict":"met"|"partial"|"missing","quote":"exact words copied from the resume, or empty","note":"<=12 words"}.',
+        json: true, reasoning: LOW, temperature: 0, max_tokens: 300,
+      },
+    );
+    if (!json) throw new Error(text?.slice(0, 60) || 'no JSON');
+    const verdict = ['met', 'partial', 'missing'].includes(json.verdict) ? json.verdict : 'missing';
+    const verified = verdict === 'missing' ? true : verifyQuote(json.quote, cand.text);
+    return { verdict: verdict !== 'missing' && !verified ? 'unverified' : verdict, quote: json.quote || '', note: json.note || '' };
+  }, {
+    concurrency: 48,
+    onResult: (r, i) => send('cell', { c: ci.get(jobs[i].cand), k: jobs[i].crit.id, ...(r.ok ? r.value : { verdict: 'error', note: r.error }) }),
+  });
+
+  send('status', { msg: `Done: ${meter.calls} calls, $${meter.spent.toFixed(4)} spent.` });
+}
+
+export function start() {
+  return http.createServer(async (req, res) => {
+    if (req.url === '/events') {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+      res.write(`event: meter\ndata: ${JSON.stringify(meter.snapshot())}\n\n`);
+      res.write(`event: model\ndata: ${JSON.stringify({ model: MODEL })}\n\n`);
+      clients.add(res);
+      req.on('close', () => clients.delete(res));
+      return;
+    }
+    if (req.url === '/jd' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', async () => {
+        try {
+          const job = await fetchJob(JSON.parse(body || '{}').url || '');
+          res.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(job));
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' }).end(JSON.stringify({ error: e.message }));
+        }
+      });
+      return;
+    }
+    if (req.url === '/run' && req.method === 'POST') {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        run(JSON.parse(body || '{}')).catch((e) => send('error', { msg: e.message }));
+        res.writeHead(202).end();
+      });
+      return;
+    }
+    const html = await readFile(new URL('./public/index.html', import.meta.url));
+    res.writeHead(200, { 'Content-Type': 'text/html' }).end(html);
+  }).listen(PORT, () => console.log(`$1 Hiring Grid on http://localhost:${PORT}  (model ${MODEL}, budget $${meter.limit})`));
+}
+if (process.argv[1] && import.meta.url.endsWith('/' + process.argv[1].split('/').pop())) start();

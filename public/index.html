@@ -3,59 +3,111 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>One Dollar Swarm</title>
+<title>$1 Hiring Grid</title>
 <style>
-  :root { --bg:#0b0b0d; --fg:#f2f2f2; --mut:#8a8a93; --acc:#ff7a1a; --card:#16161a; --line:#26262c; }
+  :root { --bg:#0b0b0d; --fg:#f2f2f2; --mut:#8a8a93; --acc:#ff7a1a; --card:#16161a; --line:#26262c;
+          --met:#2fbf71; --partial:#e5b13a; --missing:#3a2224; --unv:#8b5cf6; }
   * { box-sizing:border-box; }
-  body { margin:0; font:15px/1.5 ui-sans-serif,system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
-  header { position:sticky; top:0; background:var(--bg); padding:20px 28px 16px; border-bottom:1px solid var(--line); z-index:2; }
-  h1 { margin:0 0 12px; font-size:20px; letter-spacing:-.01em; }
-  h1 span { color:var(--acc); }
-  form { display:flex; gap:8px; }
-  input { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font:inherit; }
-  #q { flex:1; }
-  #n { width:90px; }
-  button { background:var(--acc); color:#000; border:0; border-radius:8px; padding:0 18px; font-weight:600; cursor:pointer; }
-  .meter { margin-top:14px; display:flex; align-items:center; gap:14px; font-variant-numeric:tabular-nums; }
-  .bar { flex:1; height:10px; background:var(--card); border-radius:99px; overflow:hidden; }
+  body { margin:0; font:14px/1.45 ui-sans-serif,system-ui,-apple-system,sans-serif; background:var(--bg); color:var(--fg); }
+  header { position:sticky; top:0; background:var(--bg); padding:16px 24px 12px; border-bottom:1px solid var(--line); z-index:3; }
+  h1 { margin:0 0 10px; font-size:20px; } h1 span { color:var(--acc); }
+  form { display:grid; grid-template-columns:1fr 1.4fr 80px 110px; gap:8px; }
+  textarea, input { background:var(--card); color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font:inherit; font-size:12.5px; }
+  textarea { height:78px; resize:vertical; }
+  button { background:var(--acc); color:#000; border:0; border-radius:8px; font-weight:700; cursor:pointer; }
+  .row { margin-top:10px; display:flex; align-items:center; gap:14px; font-variant-numeric:tabular-nums; }
+  .bar { flex:1; height:9px; background:var(--card); border-radius:99px; overflow:hidden; }
   .fill { height:100%; width:0; background:linear-gradient(90deg,#ffb36b,var(--acc)); transition:width .25s; }
-  #money { font-size:22px; font-weight:700; min-width:170px; }
-  #stats, #status { color:var(--mut); font-size:13px; }
-  main { padding:20px 28px 60px; }
-  #final { background:var(--card); border:1px solid var(--acc); border-radius:12px; padding:16px 20px; margin-bottom:20px; white-space:pre-wrap; display:none; }
-  #grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:10px; }
-  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:12px; font-size:13px; opacity:.45; transition:opacity .3s,border-color .3s; }
-  .card.done { opacity:1; border-color:#3a3a42; }
-  .card.err { border-color:#7a2a2a; }
-  .card b { display:block; font-size:12px; color:var(--acc); }
-  .card i { display:block; color:var(--mut); font-size:11px; margin-bottom:6px; }
+  #money { font-size:22px; font-weight:700; min-width:165px; }
+  #stats, #status { color:var(--mut); font-size:12.5px; }
+  #critCount { font-size:28px; font-weight:800; color:var(--acc); min-width:60px; text-align:right; }
+  .legend span { display:inline-flex; align-items:center; gap:4px; margin-right:10px; font-size:12px; color:var(--mut); }
+  .legend i { width:10px; height:10px; border-radius:2px; display:inline-block; }
+  main { padding:16px 24px 60px; display:grid; grid-template-columns:300px 1fr; gap:18px; }
+  #board { position:sticky; top:236px; align-self:start; }
+  .lb { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+  .lb b { display:flex; justify-content:space-between; } .lb b span:last-child { color:var(--acc); }
+  .lb small { color:var(--mut); display:block; }
+  .lb .mini { height:6px; background:#222; border-radius:9px; margin-top:6px; overflow:hidden; } .lb .mini div { height:100%; background:var(--met); }
+  table { border-collapse:collapse; width:100%; font-size:12px; }
+  th { position:sticky; top:236px; background:var(--bg); text-align:left; padding:6px; border-bottom:1px solid var(--line); z-index:2; }
+  td { padding:3px 6px; border-bottom:1px solid #18181c; vertical-align:middle; }
+  tr.cat td { padding-top:12px; color:var(--acc); font-weight:700; border:0; }
+  td.crit { max-width:420px; } td.crit .w { color:var(--mut); margin-left:6px; } td.crit .must { color:var(--acc); font-size:10px; margin-left:4px; }
+  td.cell { width:84px; text-align:center; }
+  .dot { display:inline-block; width:64px; height:18px; border-radius:4px; background:#1c1c20; cursor:help; font-size:10px; line-height:18px; color:#000; }
+  .dot.met { background:var(--met); } .dot.partial { background:var(--partial); } .dot.missing { background:var(--missing); color:#aa6b6f; }
+  .dot.unverified { background:var(--unv); color:#fff; }
+  details summary { cursor:pointer; color:var(--mut); font-size:12px; } .dot.error { background:#444; color:#bbb; }
+  .inputs { display:grid; grid-template-columns:1fr 1.2fr 150px; gap:10px; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .panel label { font-size:11px; color:var(--mut); text-transform:uppercase; letter-spacing:.06em; }
+  .urlrow { display:flex; gap:6px; } .urlrow input { flex:1; min-width:0; }
+  .ghost { background:#24242a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:0 12px; font-weight:600; cursor:pointer; font-size:12px; }
+  .panel textarea { height:64px; background:var(--bg); }
+  .panel input { background:var(--bg); }
+  #jobMeta { font-size:12px; color:var(--met); min-height:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #drop { border:1.5px dashed #3a3a42; border-radius:8px; padding:10px; text-align:center; color:var(--mut); font-size:12.5px; cursor:pointer; transition:.15s; }
+  #drop.over { border-color:var(--acc); color:var(--fg); background:#1d1712; }
+  #chips { display:flex; flex-wrap:wrap; gap:6px; max-height:64px; overflow:auto; }
+  .chip { background:#24242a; border:1px solid var(--line); border-radius:99px; padding:3px 6px 3px 10px; font-size:12px; display:inline-flex; gap:6px; align-items:center; }
+  .chip small { color:var(--mut); } .chip.bad { border-color:var(--no, #e5484d); }
+  .chip button { background:none; border:0; color:var(--mut); cursor:pointer; font-size:14px; padding:0 2px; }
+  .go { display:flex; flex-direction:column; gap:8px; }
+  .go button#run { flex:1; font-size:15px; }
+  #tip { position:fixed; pointer-events:none; background:#000; border:1px solid var(--line); border-radius:8px; padding:8px 10px; max-width:380px; font-size:12px; display:none; z-index:9; }
 </style>
 </head>
 <body>
 <header>
-  <h1>One Dollar <span>Swarm</span> · <small id="model" style="color:var(--mut);font-weight:400"></small></h1>
-  <form id="f">
-    <input id="q" placeholder="Ask a hard question…" required />
-    <input id="n" type="number" min="1" max="1000" value="100" title="Number of parallel agents" />
-    <button>Launch</button>
+  <h1><span>$1</span> Hiring Grid <small id="model" style="color:var(--mut);font-weight:400"></small></h1>
+  <form id="f" class="inputs">
+    <div class="panel">
+      <label>Job</label>
+      <div class="urlrow">
+        <input id="jobUrl" type="url" placeholder="Paste job URL (Lever, Greenhouse, Ashby, careers page…)" />
+        <button type="button" class="ghost" id="fetchJd">Fetch</button>
+      </div>
+      <div id="jobMeta"></div>
+      <details><summary>…or paste / edit the description</summary><textarea id="job" placeholder="Job description text"></textarea></details>
+    </div>
+    <div class="panel">
+      <label>Candidates</label>
+      <div id="drop">Drop resume PDFs here or <u>browse</u><input id="file" type="file" accept="application/pdf,.pdf,.txt,.md" multiple hidden /></div>
+      <div id="chips"></div>
+      <details><summary>…or paste resume text (name on first line, separate with ---)</summary><textarea id="cands" placeholder="Name\nresume text…\n---\nName 2\n…"></textarea></details>
+    </div>
+    <div class="go">
+      <label style="font-size:11px;color:var(--mut)">CRITERIA TARGET <input id="n" type="number" min="10" max="300" value="100" style="width:100%;margin-top:4px" /></label>
+      <button id="run">Run grid</button>
+    </div>
   </form>
-  <div class="meter">
+  <div class="row">
     <div id="money">$0.0000 / $1</div>
     <div class="bar"><div class="fill" id="fill"></div></div>
     <div id="stats">0 calls</div>
+    <div id="critCount">0</div><div style="color:var(--mut);font-size:12px">criteria</div>
   </div>
-  <div id="status"></div>
+  <div class="row">
+    <div class="legend"><span><i style="background:var(--met)"></i>met</span><span><i style="background:var(--partial)"></i>partial</span><span><i style="background:var(--missing)"></i>missing</span><span><i style="background:var(--unv)"></i>quote not found in resume</span></div>
+    <div id="status"></div>
+  </div>
 </header>
 <main>
-  <div id="final"></div>
-  <div id="grid"></div>
+  <aside id="board"></aside>
+  <section><table id="grid"></table></section>
 </main>
-<script>
+<div id="tip"></div>
+<script type="module">
+  import * as pdfjs from 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs';
+  pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs';
   const $ = (id) => document.getElementById(id);
-  const es = new EventSource('/events');
+  const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
   const fmt = (n) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : n;
-  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
-  es.addEventListener('model', (e) => $('model').textContent = JSON.parse(e.data).model);
+  const PTS = { met: 1, partial: 0.5 };
+  let names = [], crits = [], cells = {};
+  const es = new EventSource('/events');
+  es.addEventListener('model', (e) => $('model').textContent = '· ' + JSON.parse(e.data).model);
   es.addEventListener('meter', (e) => {
     const s = JSON.parse(e.data);
     $('money').textContent = `$${s.spent.toFixed(4)} / $${s.limit}`;
@@ -64,21 +116,115 @@
   });
   es.addEventListener('status', (e) => $('status').textContent = JSON.parse(e.data).msg);
   es.addEventListener('error', (e) => { if (e.data) $('status').textContent = 'Error: ' + JSON.parse(e.data).msg; });
-  es.addEventListener('agents', (e) => {
-    $('grid').innerHTML = JSON.parse(e.data).map((a, i) =>
-      `<div class="card" id="c${i}"><b>${esc(a.name)}</b><i>${esc(a.lens)}</i><span>…</span></div>`).join('');
+  es.addEventListener('candidates', (e) => { names = JSON.parse(e.data); board(); });
+  es.addEventListener('criteriaCount', (e) => $('critCount').textContent = JSON.parse(e.data).count);
+  es.addEventListener('criteria', (e) => {
+    const d = JSON.parse(e.data); crits = d.criteria;
+    $('critCount').textContent = crits.length;
+    $('critCount').title = `${d.generated} generated, ${crits.length} after dedupe`;
+    let html = `<tr><th>Criterion (weight)</th>${names.map((n) => `<th>${esc(n)}</th>`).join('')}</tr>`, cat = '';
+    for (const c of crits) {
+      if (c.category !== cat) { cat = c.category; html += `<tr class="cat"><td colspan="${names.length + 1}">${esc(cat)}</td></tr>`; }
+      html += `<tr><td class="crit">${esc(c.criterion)}<span class="w">×${c.weight}</span>${c.must_have ? '<span class="must">MUST</span>' : ''}</td>` +
+        names.map((_, i) => `<td class="cell"><span class="dot" id="d${i}_${c.id}">…</span></td>`).join('') + '</tr>';
+    }
+    $('grid').innerHTML = html;
   });
-  es.addEventListener('answer', (e) => {
-    const r = JSON.parse(e.data), c = $('c' + r.i);
-    if (!c) return;
-    c.classList.add(r.ok ? 'done' : 'err');
-    c.querySelector('span').textContent = r.ok ? r.value : r.error;
+  es.addEventListener('cell', (e) => {
+    const r = JSON.parse(e.data); cells[`${r.c}_${r.k}`] = r;
+    const d = $(`d${r.c}_${r.k}`);
+    if (d) { d.className = 'dot ' + r.verdict; d.textContent = r.verdict === 'unverified' ? '?' : r.verdict; }
+    board();
   });
-  es.addEventListener('final', (e) => { $('final').style.display = 'block'; $('final').textContent = JSON.parse(e.data).text; });
-  $('f').onsubmit = (e) => {
+  function board() {
+    const rows = names.map((n, i) => {
+      let got = 0, max = 0, done = 0, receipts = 0, mustMiss = 0;
+      for (const c of crits) {
+        const r = cells[`${i}_${c.id}`]; max += c.weight;
+        if (!r) continue; done++;
+        got += (PTS[r.verdict] || 0) * c.weight;
+        if (r.verdict === 'met' || r.verdict === 'partial') receipts++;
+        if (c.must_have && (r.verdict === 'missing' || r.verdict === 'unverified')) mustMiss++;
+      }
+      return { n, score: max ? Math.round((got / max) * 100) : 0, done, receipts, mustMiss };
+    }).sort((a, b) => b.score - a.score);
+    $('board').innerHTML = '<div style="color:var(--mut);font-size:12px;margin-bottom:6px">SHORTLIST</div>' + rows.map((r, k) =>
+      `<div class="lb"><b><span>${k + 1}. ${esc(r.n)}</span><span>${r.score}</span></b>` +
+      `<small>${r.receipts} receipts · ${r.mustMiss} must-haves missing · ${r.done}/${crits.length} checked</small>` +
+      `<div class="mini"><div style="width:${r.score}%"></div></div></div>`).join('');
+  }
+  document.addEventListener('mousemove', (e) => {
+    const t = e.target.closest?.('.dot'), tip = $('tip');
+    if (!t || !t.id) { tip.style.display = 'none'; return; }
+    const r = cells[t.id.slice(1)];
+    if (!r) { tip.style.display = 'none'; return; }
+    tip.innerHTML = `<b>${esc(r.verdict)}</b>${r.quote ? `<div style="margin-top:4px">“${esc(r.quote)}”</div>` : ''}<div style="color:var(--mut);margin-top:4px">${esc(r.note)}</div>`;
+    tip.style.display = 'block'; tip.style.left = Math.min(e.clientX + 14, innerWidth - 400) + 'px'; tip.style.top = (e.clientY + 14) + 'px';
+  });
+  // ---- Candidates: PDFs → text in the browser ----
+  const files = []; // { name, text, pages, error }
+  const nameFromFile = (f) => f.replace(/\.(pdf|txt|md)$/i, '').replace(/[_-]+/g, ' ').replace(/\b(resume|cv|final|v\d+)\b/gi, '').replace(/\s+/g, ' ').trim() || f;
+  async function pdfText(file) {
+    const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+    let out = '';
+    for (let p = 1; p <= doc.numPages; p++) {
+      const tc = await (await doc.getPage(p)).getTextContent();
+      let line = '', lastY;
+      for (const it of tc.items) {
+        const y = it.transform?.[5];
+        if (lastY !== undefined && Math.abs(y - lastY) > 2) { out += line.trim() + '\n'; line = ''; }
+        line += it.str + (it.hasEOL ? '\n' : ' '); lastY = y;
+      }
+      out += line.trim() + '\n\n';
+    }
+    return { text: out.replace(/[ \t]+/g, ' ').trim(), pages: doc.numPages };
+  }
+  function chips() {
+    $('chips').innerHTML = files.map((f, i) =>
+      `<span class="chip${f.error ? ' bad' : ''}" title="${esc(f.error || f.text.slice(0, 300))}">${esc(f.name)} <small>${f.error ? 'unreadable' : f.loading ? 'reading…' : f.pages ? f.pages + 'p' : 'txt'}</small><button type="button" data-i="${i}">×</button></span>`).join('');
+  }
+  $('chips').onclick = (e) => { const i = e.target.dataset?.i; if (i !== undefined) { files.splice(+i, 1); chips(); } };
+  async function addFiles(list) {
+    for (const file of list) {
+      const f = { name: nameFromFile(file.name), text: '', loading: true }; files.push(f); chips();
+      try {
+        if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') Object.assign(f, await pdfText(file));
+        else f.text = await file.text();
+        if (f.text.length < 80) f.error = 'No selectable text (scanned PDF?). Paste text instead.';
+      } catch (err) { f.error = err.message; }
+      f.loading = false; chips();
+    }
+  }
+  const drop = $('drop');
+  drop.onclick = () => $('file').click();
+  $('file').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; };
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => addFiles([...e.dataTransfer.files]));
+
+  // ---- Job: URL → text ----
+  async function fetchJd() {
+    const url = $('jobUrl').value.trim(); if (!url) return false;
+    $('jobMeta').style.color = 'var(--mut)'; $('jobMeta').textContent = 'Fetching…';
+    const r = await fetch('/jd', { method: 'POST', body: JSON.stringify({ url }) }).then((r) => r.json());
+    if (r.error) { $('jobMeta').style.color = '#e5484d'; $('jobMeta').textContent = r.error; document.querySelector('details').open = true; return false; }
+    $('job').value = r.text; $('jobMeta').style.color = 'var(--met)';
+    $('jobMeta').textContent = `✓ ${r.title} · ${r.text.split(/\s+/).length} words`;
+    return true;
+  }
+  $('fetchJd').onclick = fetchJd;
+  $('jobUrl').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); fetchJd(); } });
+
+  $('f').onsubmit = async (e) => {
     e.preventDefault();
-    $('final').style.display = 'none'; $('grid').innerHTML = '';
-    fetch('/run', { method: 'POST', body: JSON.stringify({ question: $('q').value, n: $('n').value }) });
+    if (!$('job').value.trim() && $('jobUrl').value.trim() && !(await fetchJd())) return;
+    if (!$('job').value.trim()) { $('status').textContent = 'Add a job URL or description.'; return; }
+    if (files.some((f) => f.loading)) { $('status').textContent = 'Still reading PDFs…'; return; }
+    const pasted = $('cands').value.trim() ? $('cands').value.split(/\n\s*-{3,}\s*\n/).map((t, i) => ({ name: t.trim().split('\n')[0].slice(0, 60) || `Candidate ${i + 1}`, text: t.trim() })) : [];
+    const candidates = [...files.filter((f) => !f.error && f.text), ...pasted].map(({ name, text }) => ({ name, text }));
+    if (!candidates.length) { $('status').textContent = 'Add at least one resume.'; return; }
+    crits = []; cells = {}; $('grid').innerHTML = ''; $('critCount').textContent = '0';
+    fetch('/run', { method: 'POST', body: JSON.stringify({ job: $('job').value, candidates, n: $('n').value }) });
   };
 </script>
 </body>

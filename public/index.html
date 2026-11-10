@@ -55,6 +55,13 @@
   .chip button { background:none; border:0; color:var(--mut); cursor:pointer; font-size:14px; padding:0 2px; }
   .go { display:flex; flex-direction:column; gap:8px; }
   .go button#run { flex:1; font-size:15px; }
+  .verdict { border-radius:12px; padding:14px; margin-bottom:12px; border:1px solid; }
+  .verdict .big { font-size:22px; font-weight:800; } .verdict .sub { font-size:12.5px; margin-top:4px; color:var(--fg); opacity:.85; }
+  .verdict.good { background:#0f2a1c; border-color:var(--met); } .verdict.good .big { color:var(--met); }
+  .verdict.maybe { background:#2a2410; border-color:var(--partial); } .verdict.maybe .big { color:var(--partial); }
+  .verdict.bad { background:#2a1214; border-color:#e5484d; } .verdict.bad .big { color:#e5484d; }
+  .verdict.wait { background:var(--card); border-color:var(--line); } .verdict.wait .big { color:var(--mut); font-size:16px; }
+  .counts { display:flex; gap:10px; font-size:12px; margin-top:6px; flex-wrap:wrap; } .counts b { font-weight:700; }
   #tip { position:fixed; pointer-events:none; background:#000; border:1px solid var(--line); border-radius:8px; padding:8px 10px; max-width:380px; font-size:12px; display:none; z-index:9; }
 </style>
 </head>
@@ -138,20 +145,33 @@
   });
   function board() {
     const rows = names.map((n, i) => {
-      let got = 0, max = 0, done = 0, receipts = 0, mustMiss = 0;
+      let got = 0, max = 0, done = 0, mustMiss = 0, mustTotal = 0;
+      const k = { met: 0, partial: 0, missing: 0, unverified: 0, error: 0 };
       for (const c of crits) {
-        const r = cells[`${i}_${c.id}`]; max += c.weight;
+        const r = cells[`${i}_${c.id}`];
+        if (c.must_have) mustTotal++;
         if (!r) continue; done++;
-        got += (PTS[r.verdict] || 0) * c.weight;
-        if (r.verdict === 'met' || r.verdict === 'partial') receipts++;
-        if (c.must_have && (r.verdict === 'missing' || r.verdict === 'unverified')) mustMiss++;
+        k[r.verdict] = (k[r.verdict] || 0) + 1;
+        if (r.verdict === 'error') continue;            // errors don't count for or against
+        max += c.weight; got += (PTS[r.verdict] || 0) * c.weight;
+        if (c.must_have && r.verdict !== 'met' && r.verdict !== 'partial') mustMiss++;
       }
-      return { n, score: max ? Math.round((got / max) * 100) : 0, done, receipts, mustMiss };
+      const score = max ? Math.round((got / max) * 100) : 0;
+      const mustPct = mustTotal ? Math.round(((mustTotal - mustMiss) / mustTotal) * 100) : 100;
+      const finished = crits.length && done >= crits.length;
+      let cls = 'wait', label = crits.length ? `Checking… ${done}/${crits.length}` : 'Waiting for criteria…', why = '';
+      if (finished && k.error > crits.length * 0.3) { cls = 'wait'; label = 'Inconclusive'; why = `${k.error} checks failed. Restart the server and rerun.`; }
+      else if (finished && score >= 65 && mustPct >= 70) { cls = 'good'; label = 'Strong match'; why = `Meets ${mustPct}% of must-haves with evidence.`; }
+      else if (finished && score >= 35 && mustPct >= 40) { cls = 'maybe'; label = 'Possible match'; why = `Meets ${mustPct}% of must-haves, so interview to close the gaps.`; }
+      else if (finished) { cls = 'bad'; label = 'Not a match'; why = `Only ${mustPct}% of must-haves have evidence in the resume.`; }
+      return { n, score, done, k, mustMiss, mustTotal, mustPct, cls, label, why };
     }).sort((a, b) => b.score - a.score);
-    $('board').innerHTML = '<div style="color:var(--mut);font-size:12px;margin-bottom:6px">SHORTLIST</div>' + rows.map((r, k) =>
-      `<div class="lb"><b><span>${k + 1}. ${esc(r.n)}</span><span>${r.score}</span></b>` +
-      `<small>${r.receipts} receipts · ${r.mustMiss} must-haves missing · ${r.done}/${crits.length} checked</small>` +
-      `<div class="mini"><div style="width:${r.score}%"></div></div></div>`).join('');
+    $('board').innerHTML = '<div style="color:var(--mut);font-size:12px;margin-bottom:6px">SHORTLIST</div>' + rows.map((r, idx) =>
+      `<div class="verdict ${r.cls}"><div style="display:flex;justify-content:space-between;align-items:baseline"><span style="font-weight:700">${idx + 1}. ${esc(r.n)}</span><span class="big">${r.score}<small style="font-size:12px;opacity:.7">/100</small></span></div>` +
+      `<div class="big" style="font-size:18px;margin-top:4px">${r.label}</div>` + (r.why ? `<div class="sub">${esc(r.why)}</div>` : '') +
+      `<div class="counts"><span style="color:var(--met)"><b>${r.k.met}</b> met</span><span style="color:var(--partial)"><b>${r.k.partial}</b> partial</span><span style="color:#aa6b6f"><b>${r.k.missing}</b> missing</span>` +
+      (r.k.unverified ? `<span style="color:var(--unv)"><b>${r.k.unverified}</b> fake quotes caught</span>` : '') + (r.k.error ? `<span style="color:#999"><b>${r.k.error}</b> errors</span>` : '') + `</div>` +
+      `<div class="counts" style="color:var(--mut)">Must-haves: ${r.mustTotal - r.mustMiss}/${r.mustTotal}</div></div>`).join('');
   }
   document.addEventListener('mousemove', (e) => {
     const t = e.target.closest?.('.dot'), tip = $('tip');
@@ -163,7 +183,7 @@
   });
   // ---- Candidates: PDFs → text in the browser ----
   const files = []; // { name, text, pages, error }
-  const nameFromFile = (f) => f.replace(/\.(pdf|txt|md)$/i, '').replace(/[_-]+/g, ' ').replace(/\b(resume|cv|final|v\d+)\b/gi, '').replace(/\s+/g, ' ').trim() || f;
+  const nameFromFile = (f) => { try { f = decodeURIComponent(f); } catch {} return f.replace(/%[0-9a-f]{2}/gi, ' ').replace(/\(\d+\)/g, '').replace(/\.(pdf|txt|md)$/i, '').replace(/[_-]+/g, ' ').replace(/\b(resume|cv|final|v\d+)\b/gi, '').replace(/\s+/g, ' ').trim() || f; };
   async function pdfText(file) {
     const doc = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
     let out = '';
